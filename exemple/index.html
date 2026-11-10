@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <title>js_vendor Test</title>
+  <style>
+    body { font-family: sans-serif; padding: 40px; max-width: 640px; margin: auto; }
+    button { padding: 10px 20px; margin: 5px; cursor: pointer; }
+    #result { font-size: 24px; font-weight: bold; color: #2563eb; margin: 20px 0; }
+    #log { background: #f3f4f6; padding: 12px; border-radius: 6px; font-family: monospace; font-size: 12px; min-height: 60px; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <h1>js_vendor Test</h1>
+  <p>Result: <span id="result">—</span></p>
+
+  <button id="btn-add">Add (10 + 5)</button>
+  <button id="btn-multiply">Multiply (10 × 5)</button>
+  <button id="btn-both">Both (add + multiply)</button>
+  <button id="btn-jquery">With jQuery</button>
+  <button id="btn-clear">Clear log</button>
+
+  <h3>Log:</h3>
+  <pre id="log"></pre>
+
+  <!-- ✅ Script no FINAL do body: DOM já tá pronto -->
+  <script type="module">
+    import autoloader from '/js_composer/js_vendor/autoloader.js';
+
+    const log = (msg) => {
+      const el = document.querySelector('#log');
+      el.textContent += msg + '\n';
+    };
+
+    const data = { a: 10, b: 5 };
+
+    log('✅ script carregou');
+    log('autoloader: ' + typeof autoloader);
+
+    document.querySelector('#btn-clear').addEventListener('click', () => {
+      document.querySelector('#log').textContent = '';
+    });
+
+    document.querySelector('#btn-add').addEventListener('click', () => {
+      log('--- CLICk ADD ---');
+      log('typeof autoloader: ' + typeof autoloader);
+
+      try {
+        autoloader(['formatNumber()', 'add()']);
+      } catch (e) {
+        log('❌ autoloader erro: ' + e.message);
+        return;
+      }
+
+      log('typeof add: ' + typeof add);
+      log('typeof window.add: ' + typeof window.add);
+
+      if (typeof add !== 'function') {
+        log('❌ add was not loaded');
+        return;
+      }
+
+      add(data);
+      log('✅ add done');
+    });
+
+    document.querySelector('#btn-multiply').addEventListener('click', () => {
+      log('--- CLICk MULTIPLY ---');
+      autoloader(['formatNumber()', 'multiply()']);
+      log('typeof multiply: ' + typeof multiply);
+      if (typeof multiply === 'function') {
+        multiply(data);
+        log('✅ multiply done');
+      } else {
+        log('❌ multiply was not loaded');
+      }
+    });
+
+    document.querySelector('#btn-both').addEventListener('click', () => {
+      log('--- CLICk BOTH ---');
+      autoloader(['formatNumber()', 'add()', 'multiply()']);
+      log('typeof add: ' + typeof add);
+      log('typeof multiply: ' + typeof multiply);
+      if (typeof add === 'function') add(data);
+      if (typeof multiply === 'function') setTimeout(() => multiply(data), 1000);
+      log('✅ both done');
+    });
+
+    document.querySelector('#btn-jquery').addEventListener('click', () => {
+      log('--- CLICk JQUERY ---');
+      autoloader(['jquery.min', 'formatNumber()', 'withJquery()']);
+      log('typeof jQuery: ' + typeof jQuery);
+      log('typeof withJquery: ' + typeof withJquery);
+      if (typeof withJquery === 'function') {
+        withJquery(data);
+        log('✅ withJquery done');
+      } else {
+        log('❌ withJquery was not loaded');
+      }
+    });
+  </script>
+</body>
+</html>

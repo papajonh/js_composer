@@ -1,0 +1,483 @@
+Sistema de **lazy loading de JavaScript** inspirado no Composer.
+
+Carrega **apenas** as funções e libs que a página precisa, **sob demanda**, sem baixar o arquivo inteiro.
+
+- ✅ Fatia funções de um `.js` grande por marcadores (`//=>() nome()` / `//=>() end`)
+- ✅ Carrega libs completas (`jquery.min.js`, `bootstrap.min.js`, etc) do `src/`
+- ✅ Funciona em **HTML estático**, **PHP dinâmico**, **SPA**, **qualquer pasta**
+- ✅ Cache em memória (`window` + `loaded` Set) + cache HTTP (`Cache-Control: immutable`)
+- ✅ Config centralizada (`js_vendor/js_composer.json`)
+- ✅ Validação CLI (`check`, `list`)
+- ✅ Motor reutilizável (`js_vendor/` intocável)
+- ✅ Função pura (`core.php`) pra usar server-side sem HTTP
+
+---
+
+## 📁 Estrutura
+
+seu-projeto/
+├── exemple/ ← exemplo (páginas, handlers, sources)
+│ ├── index.html ← página de teste
+│ ├── handlers/ ← handlers (funções fatiáveis)
+│ │ └── withJquery.js
+│ └── sources/ ← sources (funções fatiáveis)
+│ ├── events.js
+│ └── formatNumber.js
+│
+└── js_vendor/ ← motor (intocável, nome fixo)
+├── loader.php ← wrapper HTTP (headers + try/catch)
+├── autoloader.js ← client-side (fetch + injeção no window)
+├── js_composer.json ← config (igual composer.json)
+├── js_composer/
+│ ├── core.php ← função pura js_composer_resolve()
+│ ├── check.php ← validador (JSON + marcadores + libs)
+│ └── cli.php ← CLI (check, list)
+└── src/ ← libs completas
+└── jquery.min.js
+text
+
+
+### O que é cada coisa
+
+| Arquivo | Função |
+|---|---|
+| `js_vendor/loader.php` | Endpoint HTTP. Lê `?fn=...`, chama `core.php`, retorna JS |
+| `js_vendor/autoloader.js` | Client-side. Faz fetch do `loader.php` e injeta no `window` |
+| `js_vendor/js_composer.json` | Config (`js-path`, `lib-src`, `ignore`) |
+| `js_vendor/js_composer/core.php` | Função pura `js_composer_resolve(array $names): string` |
+| `js_vendor/js_composer/check.php` | Valida JSON, marcadores e existência de libs |
+| `js_vendor/js_composer/cli.php` | CLI: `php cli.php check` ou `php cli.php list` |
+| `js_vendor/src/` | Libs completas (jQuery, Bootstrap, etc) |
+| `exemple/handlers/` | Handlers com marcadores `//=>() nome()` / `//=>() end` |
+| `exemple/sources/` | Sources com marcadores `//=>() nome()` / `//=>() end` |
+| `exemple/index.html` | Página de teste |
+
+---
+
+## ⚙️ Configuração (`js_vendor/js_composer.json`)
+
+```json
+{
+  "name": "my-project/app",
+  "version": "1.0.0",
+  "js-path": [
+    "/exemple/handlers",
+    "/exemple/sources"
+  ],
+  "lib-src": [
+    "/js_vendor/src"
+  ],
+  "ignore": [
+    "node_modules",
+    ".git",
+    "vendor",
+    "dist",
+    "build"
+  ]
+}
+
+Campos
+Campo	Descrição
+name	Nome do projeto (informativo)
+version	Versão (informativo)
+js-path	Pastas com funções fatiáveis (contêm marcadores)
+lib-src	Pastas com libs completas (arquivos inteiros)
+ignore	Pastas ignoradas na varredura recursiva
+
+Importante: js-path e lib-src são relativos à raiz do projeto (o loader.php resolve via dirname(__DIR__)). Não coloque js_vendor no ignore, senão o lib-src não acha nada.
+🏷️ Marcadores
+
+Toda função fatiável precisa de marcadores:
+js
+
+//=>() nome()
+function nome() {
+  // ...
+}
+//=>() end
+
+Regras:
+
+    //=>() nome() abre a função. O nome() deve bater com o nome da função.
+
+    //=>() end fecha a função.
+
+    Sempre no começo da linha (coluna 0).
+
+    Cada função tem seu par abrir/fechar.
+
+    Não aninhe marcadores.
+
+Exemplo (exemple/sources/events.js):
+js
+
+//=>() add()
+function add(event) {
+  const total = Number(event.a) + Number(event.b);
+  document.querySelector('#result').textContent = formatNumber(total);
+}
+//=>() end
+
+//=>() multiply()
+function multiply(event) {
+  const total = Number(event.a) * Number(event.b);
+  document.querySelector('#result').textContent = formatNumber(total);
+}
+//=>() end
+
+Exemplo (exemple/sources/formatNumber.js):
+js
+
+//=>() formatNumber()
+function formatNumber(number) {
+  return number.toFixed(2);
+}
+//=>() end
+
+Exemplo (exemple/handlers/withJquery.js):
+js
+
+//=>() withJquery()
+function withJquery(event) {
+  const total = Number(event.a) * 2;
+  $('#result').text(formatNumber(total));
+}
+//=>() end
+
+🚀 Como usar
+1. Client-side (HTML + autoloader.js)
+
+Recomendado pra: páginas que carregam funções sob demanda (clique, AJAX, SPA).
+html
+
+<script type="module">
+  import autoloader from '/js_composer/js_vendor/autoloader.js';
+
+  // Funções (fatiadas)
+  autoloader(['add()', 'multiply()']);
+
+  // Libs (inteiras)
+  autoloader(['jquery.min']);
+
+  // Misturado
+  autoloader(['jquery.min', 'add()']);
+
+  // Usa as funções (já estão no window)
+  add({ a: 10, b: 5 });
+</script>
+
+O que acontece:
+
+    autoloader(['add()', 'multiply()']) faz fetch pro loader.php?fn=add(),multiply()
+
+    O loader.php varre os js-path (/exemple/handlers, /exemple/sources), acha //=>() add() e //=>() multiply(), fatia, retorna
+
+    O autoloader.js executa o JS no window (window.add = add;)
+
+    add(data) funciona
+
+Network: só aparece loader.php?fn=add(),multiply() (1 request, 2 funções).
+
+Se clicar de novo, não faz request (cache do loaded Set).
+2. Server-side (PHP + core.php)
+
+Recomendado pra: páginas críticas (login, checkout), ou quando você quer que o JS chegue pronto no HTML (sem fetch).
+php
+
+<?php
+require __DIR__ . '/../js_vendor/js_composer/core.php';
+
+// Carrega as funções (sem HTTP, sem fetch)
+$js = js_composer_resolve([
+    'jquery.min',        // lib completa
+    'formatNumber()',    // função fatiada
+    'add()',             // função fatiada
+]);
+?>
+<!DOCTYPE html>
+<html>
+<head>
+  <!-- JS já pronto (sem fetch) -->
+  <script><?= $js ?></script>
+</head>
+<body>
+  <script>
+    // Usa as funções (já estão no window)
+    add({ a: 10, b: 5 });
+  </script>
+</body>
+</html>
+
+Vantagens:
+
+    ✅ Zero requisição extra (JS já vem no HTML)
+
+    ✅ Mais rápido (sem latência de fetch)
+
+Desvantagens:
+
+    ⚠️ Não é lazy loading (baixa tudo de uma vez)
+
+3. PHP + autoloader.js (misturado)
+
+Recomendado pra: páginas dinâmicas que querem libs rápidas + handlers lazy.
+php
+
+<?php
+require __DIR__ . '/../js_vendor/js_composer/core.php';
+
+// Libs comuns: server-side (rápido)
+$jsBase = js_composer_resolve(['jquery.min', 'formatNumber()']);
+?>
+<!DOCTYPE html>
+<html>
+<head>
+  <!-- Libs server-side (sem fetch) -->
+  <script><?= $jsBase ?></script>
+</head>
+<body>
+  <ul id="lista"></ul>
+
+  <script type="module">
+    import autoloader from '/js_composer/js_vendor/autoloader.js';
+
+    // Handlers: client-side (lazy)
+    autoloader(['add()']);
+
+    add({ a: 10, b: 5 });
+  </script>
+</body>
+</html>
+
+Melhor dos dois mundos: libs rápidas + handlers lazy.
+4. PHP puro (sem autoloader.js)
+
+Se você não quer autoloader.js no cliente, pode chamar o loader.php via curl/file_get_contents:
+php
+
+<?php
+function carregarFuncoes(array $nomes): string {
+    $url = 'http://localhost/js_composer/js_vendor/loader.php?fn=' . urlencode(implode(',', $nomes));
+    $ctx = stream_context_create(['http' => ['timeout' => 5]]);
+    return file_get_contents($url, false, $ctx) ?: '// erro';
+}
+
+$js = carregarFuncoes(['add()', 'multiply()']);
+?>
+<script><?= $js ?></script>
+
+Desvantagem: faz requisição HTTP interna (PHP → PHP). Use só se não puder usar core.php.
+📚 Como adicionar handlers/sources
+1. Crie a função em exemple/handlers/ ou exemple/sources/ com marcadores
+
+Exemplo: exemple/sources/meuHandler.js
+js
+
+//=>() meuHandler()
+function meuHandler(event) {
+  console.log('Olá!', event);
+}
+//=>() end
+
+2. Use no cliente
+js
+
+autoloader(['meuHandler()']);
+meuHandler({ nome: 'Mundo' });
+
+Pronto. O autoloader já acha (varre /exemple/handlers e /exemple/sources).
+📚 Como adicionar libs
+1. Coloque o arquivo em js_vendor/src/
+text
+
+js_vendor/src/bootstrap.min.js
+
+2. Use no cliente
+js
+
+autoloader(['bootstrap.min']);
+// ou misturado
+autoloader(['bootstrap.min', 'add()']);
+
+Pronto. O autoloader já acha (pelo nome do arquivo, sem .js).
+✅ Validação (CI)
+1. Via HTTP
+text
+
+http://localhost/js_composer/js_vendor/js_composer/check.php
+
+2. Via CLI
+bash
+
+php js_vendor/js_composer/cli.php check
+
+Saída esperada:
+text
+
+✅ /exemple/handlers/withJquery.js — 1 function: withJquery()
+✅ /exemple/sources/events.js — 2 functions: add(), multiply()
+✅ /exemple/sources/formatNumber.js — 1 function: formatNumber()
+📚 lib: /js_vendor/src/jquery.min.js → "jquery.min"
+✅ js_composer.json OK (4 functions, 1 libs)
+
+3. Listar config
+bash
+
+php js_vendor/js_composer/cli.php list
+
+Saída:
+text
+
+Project: my-project/app
+Version: 1.0.0
+
+js-path (functions):
+  /exemple/handlers
+  /exemple/sources
+
+lib-src (libs):
+  /js_vendor/src
+
+ignore:
+  node_modules
+  .git
+  vendor
+  dist
+  build
+
+🧪 Testes rápidos
+1. Testa o loader direto
+bash
+
+curl -s "http://localhost/js_composer/js_vendor/loader.php?fn=add()"
+
+Esperado:
+js
+
+function add(event) { ... }
+window['add'] = add;
+
+2. Testa o core.php via CLI
+bash
+
+cd /var/www/html/js_composer
+php -r 'require "js_vendor/js_composer/core.php"; echo js_composer_resolve(["add()"]);'
+
+3. Testa o autoloader no Console
+js
+
+const mod = await import('/js_composer/js_vendor/autoloader.js');
+const autoloader = mod.default;
+
+console.log('Antes:', typeof window.add);
+autoloader(['add()']);
+console.log('Depois:', typeof window.add);
+
+Esperado: Antes: undefined e Depois: function.
+4. Testa a página de exemplo
+text
+
+http://localhost/js_composer/exemple/index.html
+
+Clica nos botões. Tudo deve funcionar.
+🐛 Solução de problemas
+PHP OK não aparece (Apache sem PHP)
+
+Habilite o PHP no Apache:
+bash
+
+sudo apt install libapache2-mod-php php
+sudo a2enmod php8.1   # troca pela sua versão
+sudo systemctl restart apache2
+
+loader.php retorna código-fonte PHP
+
+O arquivo tá truncado (sem <?php no começo). Confira:
+bash
+
+head -1 js_vendor/loader.php   # tem que ser "<?php"
+wc -l js_vendor/loader.php     # tem que ser ~30 linhas
+
+add is not defined
+
+O autoloader carregou mas a função não tá no window. Confira o autoloader.js (versão nova verifica window antes de retornar).
+404 not found: jquery.min
+
+O ignore tem js_vendor. Remova:
+json
+
+"ignore": ["node_modules", ".git", "vendor", "dist", "build"]
+
+500 Internal Server Error
+
+O core.php tem echo em vez de return. Confira:
+bash
+
+grep -n "echo\|return" js_vendor/js_composer/core.php
+
+Tem que ter return no final da função js_composer_resolve().
+missing ) after argument list
+
+O JS retornado pelo loader.php tá quebrado (sintaxe). Testa via curl:
+bash
+
+curl -s "http://localhost/js_composer/js_vendor/loader.php?fn=add()"
+
+Se aparecer // loader: ..., é mensagem de erro do try/catch. Me manda a mensagem.
+Código JS aparece como texto na página
+
+O <script> foi fechado no meio do código. O </script> tem que ser só no final, depois de todo o código.
+404 no autoloader.js
+
+O import tá com path errado. Confira:
+html
+
+<script type="module">
+  import autoloader from '/js_composer/js_vendor/autoloader.js';  <!-- path absoluto -->
+</script>
+
+Synchronous XMLHttpRequest (warning do Chrome)
+
+O autoloader.js usa XHR síncrono (pra autoloader([...]) funcionar direto). É normal, mas o Chrome mostra warning. Se quiser remover, migre pra fetch async (aí você precisa await autoloader([...])).
+🎯 Boas práticas
+1. Adicione dependências junto
+
+Se uma função depende de outra, carregue as duas juntas:
+js
+
+// ❌ ERRADO: add usa formatNumber, mas não foi carregado
+autoloader(['add()']);
+add(data);  // ❌ formatNumber is not defined
+
+// ✅ CERTO: carrega as duas
+autoloader(['formatNumber()', 'add()']);
+add(data);  // ✅
+
+2. Libs primeiro
+
+Se uma função usa jQuery, carregue a lib junto:
+js
+
+autoloader(['jquery.min', 'withJquery()']);
+withJquery(data);  // ✅
+
+3. Nomes específicos
+
+Se você tem outra lib que define window.add, use nomes específicos:
+js
+
+//=>() appAdd()
+function appAdd(event) { ... }
+//=>() end
+
+4. Valide no CI
+
+Sempre rode php js_vendor/js_composer/cli.php check antes de deploy.
+5. Cache-busting
+
+Adicione no HTML:
+html
+
+<meta name="js-composer-version" content="<?= filemtime(__DIR__ . '/../js_vendor/js_composer/core.php') ?>">
+
+E no autoloader.js, use o meta como versão.

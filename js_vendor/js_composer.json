@@ -1,0 +1,18 @@
+{
+    "name": "my-project/app",
+    "version": "1.0.0",
+    "js-path": [
+        "/exemple/handlers",
+        "/exemple/sources"
+    ],
+    "lib-src": [
+        "/js_vendor/src"
+    ],
+    "ignore": [
+        "node_modules",
+        ".git",
+        "vendor",
+        "dist",
+        "build"
+    ]
+}
